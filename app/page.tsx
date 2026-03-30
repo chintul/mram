@@ -107,6 +107,17 @@ const LAYERS: LayerConfig[] = [
     colorHex: "#ff8800",
     width: 2,
   },
+  {
+    key: "cmcs_licenses",
+    apiKey: "cmcs_licenses",
+    label: "Уул уурхайн тусгай зөвшөөрөл (CMCS)",
+    description: "Хайгуулын болон ашиглалтын тусгай зөвшөөрлүүд (2,800+)",
+    source: "cmcs.mrpam.gov.mn",
+    kmlName: "Уул уурхайн ТЗ",
+    color: "ff3366ff",
+    colorHex: "#ff6633",
+    width: 2,
+  },
 ];
 
 type LayerStatus = "pending" | "loading" | "done" | "error";
@@ -297,10 +308,12 @@ export default function Home() {
                 газар эзэмшил, уул уурхайн хамгаалалт
               </span>
             </div>
-            <div className="pt-1 border-t border-neutral-800">
-              <span className="text-neutral-600">
-                Тэмдэглэл: МБУГ-ын уул уурхайн тусгай зөвшөөрлийн кадастр
-                (cmcs.mram.gov.mn) нээлттэй API-гүй тул ашиглах боломжгүй
+            <div>
+              <span className="text-neutral-400 font-medium">cmcs.mrpam.gov.mn</span>
+              <span className="text-neutral-600"> &mdash; </span>
+              <span className="text-neutral-500">
+                АМГТГ-ын уул уурхайн кадастрын систем (CMCS): хайгуулын болон
+                ашиглалтын тусгай зөвшөөрлүүд
               </span>
             </div>
           </div>

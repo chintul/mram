@@ -4,6 +4,12 @@ import { NextResponse } from "next/server";
 export const maxDuration = 60;
 
 const EGAZAR_WFS = "https://geoserver.egazar.gov.mn/geoserver";
+const CMCS_BASE = "https://cmcs.mrpam.gov.mn/CMCS";
+const CMCS_HEADERS = {
+  Accept: "application/json",
+  "X-Requested-With": "XMLHttpRequest",
+  Referer: "https://cmcs.mrpam.gov.mn/CMCS/",
+};
 
 // Fetch from egazar.gov.mn WFS
 async function fetchWFS(workspace: string, typeName: string, maxFeatures?: number) {
@@ -106,6 +112,125 @@ async function fetchMiningConservation() {
   return data;
 }
 
+// CMCS Mining Cadastre - fetch all license IDs via paginated grid
+async function fetchCMCSLicenseIds(): Promise<number[]> {
+  const ids: number[] = [];
+  let page = 1;
+  const rows = 500;
+
+  while (true) {
+    const url = `${CMCS_BASE}/License/GridData?page=${page}&rows=${rows}&sidx=Id&sord=asc&_search=false`;
+    const res = await fetch(url, {
+      headers: CMCS_HEADERS,
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) throw new Error(`CMCS GridData failed: ${res.status}`);
+    const data = await res.json();
+
+    for (const row of data.rows) {
+      ids.push(row.id);
+    }
+
+    if (page >= data.total) break;
+    page++;
+  }
+
+  return ids;
+}
+
+// Parse Esri geometry from CMCS license detail page HTML
+function parseCMCSDetail(html: string): {
+  geometry: { type: string; coordinates: number[][][] };
+  name: string;
+  code: string;
+  typeName: string;
+  statusName: string;
+  area: number;
+  holder: string;
+} | null {
+  // Extract fields from the JS object literal embedded in the HTML
+  const geomMatch = html.match(/Geometry:\{rings:(\[\[[\s\S]*?\]\]),spatialReference/);
+  // License name is right after LayerId:N
+  const nameMatch = html.match(/LayerId:\d+,Name:"([^"]*?)"/);
+  const codeMatch = html.match(/Code:"([A-Z]+-\d+)"/);
+  // TypeName at the top level (not inside AdminUnits)
+  const typeMatch = html.match(/TypeName:"([^"]*?)",Area:/);
+  const statusMatch = html.match(/StatusName:"([^"]*?)"/);
+  const areaMatch = html.match(/Area:([\d.]+),Geometry/);
+  // Holder name from HolderLookup
+  const holderMatch = html.match(/HolderLookup:\{[^}]*Name:"([^"]*?)"/)
+
+  if (!geomMatch) return null;
+
+  let rings: number[][][];
+  try {
+    // The rings are valid JSON arrays
+    rings = JSON.parse(geomMatch[1]);
+  } catch {
+    return null;
+  }
+
+  return {
+    geometry: { type: "Polygon", coordinates: rings },
+    name: nameMatch?.[1] || "Тодорхойгүй",
+    code: codeMatch?.[1] || "",
+    typeName: typeMatch?.[1] || "",
+    statusName: statusMatch?.[1] || "",
+    area: parseFloat(areaMatch?.[1] || "0"),
+    holder: holderMatch?.[1] || "",
+  };
+}
+
+// Fetch a single license detail and extract geometry
+async function fetchCMCSLicenseDetail(id: number) {
+  const url = `${CMCS_BASE}/License/Details/${id}`;
+  const res = await fetch(url, {
+    headers: { ...CMCS_HEADERS, Accept: "text/html" },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) return null;
+  const html = await res.text();
+  return parseCMCSDetail(html);
+}
+
+// Fetch licenses in batches with concurrency control
+async function fetchCMCSLicenses() {
+  const ids = await fetchCMCSLicenseIds();
+
+  const features: Array<{
+    type: string;
+    properties: Record<string, string>;
+    geometry: { type: string; coordinates: number[][][] };
+  }> = [];
+
+  // Process in batches of 25 concurrent requests
+  const BATCH_SIZE = 25;
+  for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+    const batch = ids.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((id) => fetchCMCSLicenseDetail(id))
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value?.geometry) {
+        const d = result.value;
+        features.push({
+          type: "Feature",
+          properties: {
+            shapeName: `${d.name} (${d.code})`,
+            description: `${d.typeName} | ${d.statusName} | ${d.holder}`,
+            area: String(d.area),
+            type: "Уул уурхайн тусгай зөвшөөрөл",
+          },
+          geometry: d.geometry,
+        });
+      }
+    }
+  }
+
+  return { type: "FeatureCollection", features };
+}
+
 const LAYER_HANDLERS: Record<string, () => Promise<unknown>> = {
   aimags: fetchAimags,
   soums: fetchSoums,
@@ -113,6 +238,7 @@ const LAYER_HANDLERS: Record<string, () => Promise<unknown>> = {
   protection_zones: fetchProtectionZones,
   land_parcels: fetchLandUseParcels,
   mining_conservation: fetchMiningConservation,
+  cmcs_licenses: fetchCMCSLicenses,
 };
 
 export async function GET(request: Request) {
