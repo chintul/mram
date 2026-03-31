@@ -36,19 +36,22 @@ export async function setCache(layerKey: string, data: string): Promise<void> {
   });
 }
 
-export async function listCachedUrls(): Promise<Record<string, string>> {
+export async function listCachedUrls(): Promise<
+  Record<string, { url: string; isStale: boolean }>
+> {
   try {
     const { blobs } = await list({
       prefix: CACHE_PREFIX,
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
 
-    const urls: Record<string, string> = {};
+    const urls: Record<string, { url: string; isStale: boolean }> = {};
     for (const blob of blobs) {
       // blob.pathname is "cache/aimags.json" — extract "aimags"
       const match = blob.pathname.match(/^cache\/(.+)\.json$/);
       if (match) {
-        urls[match[1]] = blob.url;
+        const age = Date.now() - new Date(blob.uploadedAt).getTime();
+        urls[match[1]] = { url: blob.url, isStale: age > STALE_MS };
       }
     }
     return urls;
