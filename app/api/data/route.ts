@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
+import { getCached, setCache } from "@/app/lib/cache";
 
 // Vercel hobby plan: max 60s, pro plan: max 300s
 export const maxDuration = 60;
@@ -252,9 +254,34 @@ export async function GET(request: Request) {
     );
   }
 
+  // Try cache first
+  const cached = await getCached(layer);
+  if (cached) {
+    if (cached.isStale) {
+      after(async () => {
+        try {
+          const fresh = await LAYER_HANDLERS[layer]();
+          await setCache(layer, JSON.stringify(fresh));
+        } catch {
+          // Background refresh failed, stale cache remains
+        }
+      });
+    }
+    return new Response(cached.data, {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // No cache — fetch, cache, return
   try {
     const data = await LAYER_HANDLERS[layer]();
-    return NextResponse.json(data);
+    const json = JSON.stringify(data);
+    after(async () => {
+      await setCache(layer, json);
+    });
+    return new Response(json, {
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
     return NextResponse.json(
