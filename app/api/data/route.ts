@@ -233,7 +233,7 @@ async function fetchCMCSLicenses() {
   return { type: "FeatureCollection", features };
 }
 
-const LAYER_HANDLERS: Record<string, () => Promise<unknown>> = {
+export const LAYER_HANDLERS: Record<string, () => Promise<unknown>> = {
   aimags: fetchAimags,
   soums: fetchSoums,
   spa: fetchSPA,
