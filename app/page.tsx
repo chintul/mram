@@ -18,12 +18,6 @@ const MapView = dynamic(() => import("@/app/components/MapView"), {
 
 type SheetState = "collapsed" | "half" | "full";
 
-async function fetchLayer(apiKey: string): Promise<GeoJSONData> {
-  const res = await fetch(`/api/data?layer=${apiKey}`);
-  if (!res.ok) throw new Error(`Алдаа: ${apiKey}`);
-  return res.json();
-}
-
 export default function Home() {
   const [activeKeys, setActiveKeys] = useState<Set<string>>(
     new Set(LAYERS.filter((l) => l.autoLoad).map((l) => l.key))
@@ -38,6 +32,25 @@ export default function Home() {
   const [exporting, setExporting] = useState(false);
 
   const fetchedRef = useRef<Set<string>>(new Set());
+  const blobUrlsRef = useRef<Record<string, string>>({});
+  const blobUrlsFetchedRef = useRef(false);
+
+  const fetchBlobUrls = useCallback(async () => {
+    if (blobUrlsFetchedRef.current) return;
+    blobUrlsFetchedRef.current = true;
+    try {
+      const res = await fetch("/api/layers");
+      if (!res.ok) return;
+      const data: Record<string, { url: string | null; cached: boolean }> = await res.json();
+      for (const [key, value] of Object.entries(data)) {
+        if (value.url) {
+          blobUrlsRef.current[key] = value.url;
+        }
+      }
+    } catch {
+      // Blob URL fetch failed — will fall back to /api/data
+    }
+  }, []);
 
   const loadLayer = useCallback(async (layer: LayerConfig) => {
     if (fetchedRef.current.has(layer.key)) return;
@@ -45,7 +58,19 @@ export default function Home() {
 
     setLoadingKeys((prev) => new Set(prev).add(layer.key));
     try {
-      const data = await fetchLayer(layer.apiKey);
+      // Try blob URL first, fall back to API
+      const blobUrl = blobUrlsRef.current[layer.apiKey];
+      let data: GeoJSONData;
+      if (blobUrl) {
+        const res = await fetch(blobUrl);
+        if (!res.ok) throw new Error(`Blob fetch failed: ${layer.apiKey}`);
+        data = await res.json();
+      } else {
+        const res = await fetch(`/api/data?layer=${layer.apiKey}`);
+        if (!res.ok) throw new Error(`Алдаа: ${layer.apiKey}`);
+        data = await res.json();
+      }
+
       if (data.features?.length > 0) {
         setLayerData((prev) => {
           const next = new Map(prev);
@@ -68,7 +93,9 @@ export default function Home() {
   const autoLoadedRef = useRef(false);
   if (!autoLoadedRef.current) {
     autoLoadedRef.current = true;
-    LAYERS.filter((l) => l.autoLoad).forEach((l) => loadLayer(l));
+    fetchBlobUrls().then(() => {
+      LAYERS.filter((l) => l.autoLoad).forEach((l) => loadLayer(l));
+    });
   }
 
   const handleToggle = useCallback(
@@ -102,14 +129,13 @@ export default function Home() {
   }, []);
 
   const handleExport = useCallback(async (format: "kml" | "kmz") => {
-    // Collect already-loaded GeoJSON from client state
-    const exportLayers: { name: string; geojson: GeoJSONData; color: string; width: number }[] = [];
+    const exportLayers: { key: string; name: string; color: string; width: number }[] = [];
     for (const key of activeKeys) {
       const entry = layerData.get(key);
       if (entry && entry.data.features?.length > 0) {
         exportLayers.push({
+          key: entry.config.apiKey,
           name: entry.config.kmlName,
-          geojson: entry.data,
           color: entry.config.color,
           width: entry.config.width,
         });
