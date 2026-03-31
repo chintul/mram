@@ -1,4 +1,4 @@
-import { put, head } from "@vercel/blob";
+import { put, list } from "@vercel/blob";
 
 const CACHE_PREFIX = "cache/";
 const STALE_MS = 60 * 60 * 1000; // 1 hour
@@ -7,14 +7,18 @@ export async function getCached(
   layerKey: string
 ): Promise<{ data: string; isStale: boolean } | null> {
   try {
-    const blobUrl = `${CACHE_PREFIX}${layerKey}.json`;
-    const meta = await head(blobUrl, {
+    const { blobs } = await list({
+      prefix: `${CACHE_PREFIX}${layerKey}.json`,
+      limit: 1,
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
-    const age = Date.now() - new Date(meta.uploadedAt).getTime();
+    if (blobs.length === 0) return null;
+
+    const blob = blobs[0];
+    const age = Date.now() - new Date(blob.uploadedAt).getTime();
     const isStale = age > STALE_MS;
 
-    const res = await fetch(meta.url);
+    const res = await fetch(blob.url);
     if (!res.ok) return null;
     const data = await res.text();
     return { data, isStale };
