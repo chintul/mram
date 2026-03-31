@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import { useState, useCallback, useRef } from "react";
 import { LAYERS, type GeoJSONData, type GeoJSONFeature, type LayerConfig } from "@/app/lib/layers";
-import { geojsonToKml } from "@/app/lib/geojson-to-kml";
 import BottomSheet from "@/app/components/BottomSheet";
 import LayerPanel from "@/app/components/LayerPanel";
 import FeatureDetail from "@/app/components/FeatureDetail";
@@ -25,16 +24,6 @@ async function fetchLayer(apiKey: string): Promise<GeoJSONData> {
   return res.json();
 }
 
-function downloadFile(content: string, filename: string) {
-  const blob = new Blob([content], { type: "application/vnd.google-earth.kml+xml" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 export default function Home() {
   const [activeKeys, setActiveKeys] = useState<Set<string>>(
     new Set(LAYERS.filter((l) => l.autoLoad).map((l) => l.key))
@@ -46,6 +35,7 @@ export default function Home() {
     feature: GeoJSONFeature;
     layerConfig: LayerConfig;
   } | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const fetchedRef = useRef<Set<string>>(new Set());
 
@@ -111,25 +101,40 @@ export default function Home() {
     setSheetState("collapsed");
   }, []);
 
-  const handleExportKml = useCallback(() => {
-    const kmlLayers: { name: string; geojson: GeoJSONData; color: string; width: number }[] = [];
-
+  const handleExportKml = useCallback(async () => {
+    const apiKeys: string[] = [];
     for (const key of activeKeys) {
-      const entry = layerData.get(key);
-      if (entry && entry.data.features?.length > 0) {
-        kmlLayers.push({
-          name: entry.config.kmlName,
-          geojson: entry.data,
-          color: entry.config.color,
-          width: entry.config.width,
-        });
-      }
+      const layer = LAYERS.find((l) => l.key === key);
+      if (layer) apiKeys.push(layer.apiKey);
     }
+    if (apiKeys.length === 0) return;
 
-    if (kmlLayers.length === 0) return;
-    const kml = geojsonToKml(kmlLayers);
-    downloadFile(kml, "mongolia-gazryn-medeelel.kml");
-  }, [activeKeys, layerData]);
+    setExporting(true);
+    try {
+      const res = await fetch("/api/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ layers: apiKeys }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Export failed");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "mongolia-gazryn-medeelel.kml";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Export failed:", e);
+    } finally {
+      setExporting(false);
+    }
+  }, [activeKeys]);
 
   // Build map of only active+loaded layers
   const activeLayers = new Map<string, { config: LayerConfig; data: GeoJSONData }>();
@@ -165,7 +170,7 @@ export default function Home() {
             loadingKeys={loadingKeys}
             onToggle={handleToggle}
             onExportKml={handleExportKml}
-            exportDisabled={loadingKeys.size > 0}
+            exportDisabled={loadingKeys.size > 0 || exporting}
           />
         )}
       </BottomSheet>
