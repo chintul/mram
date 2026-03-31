@@ -101,20 +101,28 @@ export default function Home() {
     setSheetState("collapsed");
   }, []);
 
-  const handleExportKml = useCallback(async () => {
-    const apiKeys: string[] = [];
+  const handleExport = useCallback(async (format: "kml" | "kmz") => {
+    // Collect already-loaded GeoJSON from client state
+    const exportLayers: { name: string; geojson: GeoJSONData; color: string; width: number }[] = [];
     for (const key of activeKeys) {
-      const layer = LAYERS.find((l) => l.key === key);
-      if (layer) apiKeys.push(layer.apiKey);
+      const entry = layerData.get(key);
+      if (entry && entry.data.features?.length > 0) {
+        exportLayers.push({
+          name: entry.config.kmlName,
+          geojson: entry.data,
+          color: entry.config.color,
+          width: entry.config.width,
+        });
+      }
     }
-    if (apiKeys.length === 0) return;
+    if (exportLayers.length === 0) return;
 
     setExporting(true);
     try {
       const res = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ layers: apiKeys }),
+        body: JSON.stringify({ layers: exportLayers, format }),
       });
 
       if (!res.ok) {
@@ -126,7 +134,7 @@ export default function Home() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "mongolia-gazryn-medeelel.kml";
+      a.download = `mongolia-gazryn-medeelel.${format}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -134,7 +142,7 @@ export default function Home() {
     } finally {
       setExporting(false);
     }
-  }, [activeKeys]);
+  }, [activeKeys, layerData]);
 
   // Build map of only active+loaded layers
   const activeLayers = new Map<string, { config: LayerConfig; data: GeoJSONData }>();
@@ -146,16 +154,6 @@ export default function Home() {
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950">
       <MapView activeLayers={activeLayers} onFeatureClick={handleFeatureClick} />
-
-      {/* Tap to open layer panel */}
-      {sheetState === "collapsed" && (
-        <button
-          onClick={() => setSheetState("half")}
-          className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-neutral-900/90 backdrop-blur text-neutral-300 text-sm px-4 py-2 rounded-full border border-neutral-700 cursor-pointer z-[1001]"
-        >
-          Давхаргууд ({activeKeys.size})
-        </button>
-      )}
 
       <BottomSheet state={sheetState} onStateChange={setSheetState}>
         {selectedFeature ? (
@@ -169,8 +167,8 @@ export default function Home() {
             activeKeys={activeKeys}
             loadingKeys={loadingKeys}
             onToggle={handleToggle}
-            onExportKml={handleExportKml}
-            exportDisabled={loadingKeys.size > 0 || exporting}
+            onExport={handleExport}
+            exporting={exporting}
           />
         )}
       </BottomSheet>
