@@ -35,3 +35,24 @@ export async function setCache(layerKey: string, data: string): Promise<void> {
     token: process.env.BLOB_READ_WRITE_TOKEN,
   });
 }
+
+export async function listCachedUrls(): Promise<Record<string, string>> {
+  try {
+    const { blobs } = await list({
+      prefix: CACHE_PREFIX,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
+
+    const urls: Record<string, string> = {};
+    for (const blob of blobs) {
+      // blob.pathname is "cache/aimags.json" — extract "aimags"
+      const match = blob.pathname.match(/^cache\/(.+)\.json$/);
+      if (match) {
+        urls[match[1]] = blob.url;
+      }
+    }
+    return urls;
+  } catch {
+    return {};
+  }
+}
