@@ -21,7 +21,18 @@ function escapeXml(str: string): string {
 }
 
 function coordsToKml(coords: number[][]): string {
-  return coords.map((c) => `${c[0]},${c[1]},0`).join(" ");
+  // 5 decimal places ≈ 1m precision — plenty for boundaries, cuts file size ~40%
+  // Deduplicate consecutive identical points (common after rounding)
+  let prev = "";
+  const parts: string[] = [];
+  for (const c of coords) {
+    const pt = `${+c[0].toFixed(5)},${+c[1].toFixed(5)},0`;
+    if (pt !== prev) {
+      parts.push(pt);
+      prev = pt;
+    }
+  }
+  return parts.join(" ");
 }
 
 function geometryToKml(geometry: GeoJSONFeature["geometry"]): string {
