@@ -276,7 +276,13 @@ export async function GET(request: Request) {
       });
     }
     return new Response(cached.data, {
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // Serve from browser cache for 5 min, CDN for 1 hour, serve stale up to 24h while revalidating
+        "Cache-Control": cached.isStale
+          ? "public, max-age=60, s-maxage=300, stale-while-revalidate=3600"
+          : "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+      },
     });
   }
 
@@ -308,7 +314,11 @@ export async function GET(request: Request) {
     }
 
     return new Response(json, {
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // Fresh data — cache aggressively
+        "Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+      },
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";

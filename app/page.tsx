@@ -129,38 +129,44 @@ export default function Home() {
   }, []);
 
   const handleExport = useCallback(async (format: "kml" | "kmz") => {
-    const exportLayers: { key: string; name: string; color: string; width: number }[] = [];
+    const kmlLayers: { name: string; geojson: GeoJSONData; color: string; width: number }[] = [];
     for (const key of activeKeys) {
       const entry = layerData.get(key);
       if (entry && entry.data.features?.length > 0) {
-        exportLayers.push({
-          key: entry.config.apiKey,
+        kmlLayers.push({
           name: entry.config.kmlName,
+          geojson: entry.data,
           color: entry.config.color,
           width: entry.config.width,
         });
       }
     }
-    if (exportLayers.length === 0) return;
+    if (kmlLayers.length === 0) return;
 
     setExporting(true);
     try {
-      const res = await fetch("/api/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ layers: exportLayers, format }),
-      });
+      const { geojsonToKml } = await import("@/app/lib/geojson-to-kml");
+      const kml = geojsonToKml(kmlLayers);
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Export failed");
+      let blob: Blob;
+      let filename: string;
+
+      if (format === "kmz") {
+        const JSZip = (await import("jszip")).default;
+        const zip = new JSZip();
+        zip.file("doc.kml", kml);
+        const kmzBuffer = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+        blob = kmzBuffer;
+        filename = "mongolia-gazryn-medeelel.kmz";
+      } else {
+        blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
+        filename = "mongolia-gazryn-medeelel.kml";
       }
 
-      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `mongolia-gazryn-medeelel.${format}`;
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {

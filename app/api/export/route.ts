@@ -87,6 +87,7 @@ export async function POST(request: Request) {
         headers: {
           "Content-Type": "application/vnd.google-earth.kmz",
           "Content-Disposition": 'attachment; filename="mongolia-gazryn-medeelel.kmz"',
+          "Cache-Control": "private, max-age=300",
         },
       });
     }
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
       headers: {
         "Content-Type": "application/vnd.google-earth.kml+xml",
         "Content-Disposition": 'attachment; filename="mongolia-gazryn-medeelel.kml"',
+        "Cache-Control": "private, max-age=300",
       },
     });
   } catch (e) {

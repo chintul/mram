@@ -32,5 +32,10 @@ export async function GET() {
     });
   }
 
-  return NextResponse.json(result);
+  return NextResponse.json(result, {
+    headers: {
+      // Cache blob URL list for 2 min in browser, 10 min on CDN
+      "Cache-Control": "public, max-age=120, s-maxage=600, stale-while-revalidate=3600",
+    },
+  });
 }
