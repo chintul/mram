@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { geojsonToKml } from "@/app/lib/geojson-to-kml";
 import { getCached } from "@/app/lib/cache";
-import { LAYER_HANDLERS } from "@/app/api/data/route";
+import { LAYER_HANDLERS, fetchCMCSLicenses } from "@/app/api/data/route";
 import JSZip from "jszip";
 
 export const maxDuration = 60;
@@ -26,24 +26,39 @@ export async function POST(request: Request) {
       );
     }
 
-    // Fetch GeoJSON for each layer from cache or live
-    const kmlLayers: { name: string; geojson: { type: string; features: Array<{ type: string; properties: Record<string, string>; geometry: { type: string; coordinates: number[][][] | number[][][][] } }> }; color: string; width: number }[] = [];
+    // Fetch GeoJSON for each layer in parallel from cache or live
+    type GeoJSONType = { type: string; features: Array<{ type: string; properties: Record<string, string>; geometry: { type: string; coordinates: number[][][] | number[][][][] } }> };
+    const kmlLayers: { name: string; geojson: GeoJSONType; color: string; width: number }[] = [];
 
-    for (const layer of layers) {
-      if (!LAYER_HANDLERS[layer.key]) continue;
+    const deadline = Date.now() + 50_000; // leave 10s headroom for KML generation
 
-      let geojson: unknown;
+    const results = await Promise.allSettled(
+      layers
+        .filter((layer) => LAYER_HANDLERS[layer.key])
+        .map(async (layer) => {
+          let geojson: unknown;
 
-      // Try cache first
-      const cached = await getCached(layer.key);
-      if (cached) {
-        geojson = JSON.parse(cached.data);
-      } else {
-        // Fetch live
-        geojson = await LAYER_HANDLERS[layer.key]();
-      }
+          // Try cache first
+          const cached = await getCached(layer.key);
+          if (cached) {
+            geojson = JSON.parse(cached.data);
+          } else {
+            // Fetch live — use time budget for CMCS
+            if (layer.key === "cmcs_licenses") {
+              geojson = await fetchCMCSLicenses(deadline);
+            } else {
+              geojson = await LAYER_HANDLERS[layer.key]();
+            }
+          }
 
-      const data = geojson as { type: string; features: Array<{ type: string; properties: Record<string, string>; geometry: { type: string; coordinates: number[][][] | number[][][][] } }> };
+          return { layer, geojson };
+        })
+    );
+
+    for (const result of results) {
+      if (result.status !== "fulfilled") continue;
+      const { layer, geojson } = result.value;
+      const data = geojson as GeoJSONType;
 
       if (data?.features?.length > 0) {
         kmlLayers.push({

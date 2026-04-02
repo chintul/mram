@@ -237,6 +237,8 @@ async function fetchCMCSLicenses(deadlineMs?: number) {
   return { type: "FeatureCollection", features };
 }
 
+export { fetchCMCSLicenses };
+
 export const LAYER_HANDLERS: Record<string, () => Promise<unknown>> = {
   aimags: fetchAimags,
   soums: fetchSoums,
