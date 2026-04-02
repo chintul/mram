@@ -29,7 +29,7 @@ export async function getCached(
 
 export async function setCache(layerKey: string, data: string): Promise<void> {
   await put(`${CACHE_PREFIX}${layerKey}.json`, data, {
-    access: "public",
+    access: "private",
     contentType: "application/json",
     addRandomSuffix: false,
     token: process.env.BLOB_READ_WRITE_TOKEN,
