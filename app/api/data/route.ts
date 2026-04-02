@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { getCached, setCache } from "@/app/lib/cache";
+import { processLayerUpdate } from "@/app/lib/notify";
 
 // Vercel hobby plan: max 60s, pro plan: max 300s
 export const maxDuration = 60;
@@ -264,12 +265,17 @@ export async function GET(request: Request) {
   const cached = await getCached(layer);
   if (cached) {
     if (cached.isStale) {
+      const oldData = cached.data;
       after(async () => {
         try {
           const fresh = layer === "cmcs_licenses"
             ? await fetchCMCSLicenses()
             : await LAYER_HANDLERS[layer]();
-          await setCache(layer, JSON.stringify(fresh));
+          const freshJson = JSON.stringify(fresh);
+          await setCache(layer, freshJson);
+          await processLayerUpdate(layer, oldData, freshJson).catch((e) =>
+            console.error(`[notify] Failed for ${layer}:`, e)
+          );
         } catch (e) {
           console.error(`[cache] Background refresh failed for ${layer}:`, e);
         }
@@ -278,10 +284,10 @@ export async function GET(request: Request) {
     return new Response(cached.data, {
       headers: {
         "Content-Type": "application/json",
-        // Serve from browser cache for 5 min, CDN for 1 hour, serve stale up to 24h while revalidating
+        // Data changes monthly — cache aggressively. CDN 1 day, browser 1 hour, stale up to 7 days
         "Cache-Control": cached.isStale
-          ? "public, max-age=60, s-maxage=300, stale-while-revalidate=3600"
-          : "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+          ? "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400"
+          : "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
       },
     });
   }
@@ -303,10 +309,15 @@ export async function GET(request: Request) {
 
     // If CMCS was time-limited, do a full background fetch
     if (layer === "cmcs_licenses") {
+      const partialJson = json;
       after(async () => {
         try {
           const full = await fetchCMCSLicenses();
-          await setCache(layer, JSON.stringify(full));
+          const fullJson = JSON.stringify(full);
+          await setCache(layer, fullJson);
+          await processLayerUpdate(layer, partialJson, fullJson).catch((e) =>
+            console.error(`[notify] Failed for cmcs_licenses:`, e)
+          );
         } catch {
           // Partial cache remains from above
         }
@@ -316,8 +327,8 @@ export async function GET(request: Request) {
     return new Response(json, {
       headers: {
         "Content-Type": "application/json",
-        // Fresh data — cache aggressively
-        "Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+        // Fresh data — cache aggressively (data changes monthly)
+        "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
       },
     });
   } catch (e) {
