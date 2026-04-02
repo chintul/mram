@@ -195,8 +195,8 @@ async function fetchCMCSLicenseDetail(id: number) {
   return parseCMCSDetail(html);
 }
 
-// Fetch licenses in batches with concurrency control
-async function fetchCMCSLicenses() {
+// Fetch licenses in batches with concurrency control and optional time budget
+async function fetchCMCSLicenses(deadlineMs?: number) {
   const ids = await fetchCMCSLicenseIds();
 
   const features: Array<{
@@ -205,9 +205,13 @@ async function fetchCMCSLicenses() {
     geometry: { type: string; coordinates: number[][][] };
   }> = [];
 
-  // Process in batches of 25 concurrent requests
-  const BATCH_SIZE = 25;
+  const deadline = deadlineMs ?? Infinity;
+
+  // Process in batches of 100 concurrent requests
+  const BATCH_SIZE = 100;
   for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+    if (Date.now() > deadline) break;
+
     const batch = ids.slice(i, i + BATCH_SIZE);
     const results = await Promise.allSettled(
       batch.map((id) => fetchCMCSLicenseDetail(id))
@@ -240,7 +244,7 @@ export const LAYER_HANDLERS: Record<string, () => Promise<unknown>> = {
   protection_zones: fetchProtectionZones,
   land_parcels: fetchLandUseParcels,
   mining_conservation: fetchMiningConservation,
-  cmcs_licenses: fetchCMCSLicenses,
+  cmcs_licenses: () => fetchCMCSLicenses(),
 };
 
 export async function GET(request: Request) {
@@ -260,10 +264,12 @@ export async function GET(request: Request) {
     if (cached.isStale) {
       after(async () => {
         try {
-          const fresh = await LAYER_HANDLERS[layer]();
+          const fresh = layer === "cmcs_licenses"
+            ? await fetchCMCSLicenses()
+            : await LAYER_HANDLERS[layer]();
           await setCache(layer, JSON.stringify(fresh));
-        } catch {
-          // Background refresh failed, stale cache remains
+        } catch (e) {
+          console.error(`[cache] Background refresh failed for ${layer}:`, e);
         }
       });
     }
@@ -272,13 +278,33 @@ export async function GET(request: Request) {
     });
   }
 
-  // No cache — fetch, cache, return
+  // No cache — fetch, cache inline, return
   try {
-    const data = await LAYER_HANDLERS[layer]();
+    // For CMCS, enforce a deadline so we return partial results instead of 504
+    const data = layer === "cmcs_licenses"
+      ? await fetchCMCSLicenses(Date.now() + 50_000)
+      : await LAYER_HANDLERS[layer]();
     const json = JSON.stringify(data);
-    after(async () => {
+
+    // Cache inline so errors surface instead of being silently swallowed
+    try {
       await setCache(layer, json);
-    });
+    } catch (cacheErr) {
+      console.error(`[cache] Failed to write ${layer}:`, cacheErr);
+    }
+
+    // If CMCS was time-limited, do a full background fetch
+    if (layer === "cmcs_licenses") {
+      after(async () => {
+        try {
+          const full = await fetchCMCSLicenses();
+          await setCache(layer, JSON.stringify(full));
+        } catch {
+          // Partial cache remains from above
+        }
+      });
+    }
+
     return new Response(json, {
       headers: { "Content-Type": "application/json" },
     });
