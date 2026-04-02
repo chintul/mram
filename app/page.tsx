@@ -6,6 +6,7 @@ import { LAYERS, type GeoJSONData, type GeoJSONFeature, type LayerConfig } from 
 import BottomSheet from "@/app/components/BottomSheet";
 import LayerPanel from "@/app/components/LayerPanel";
 import FeatureDetail from "@/app/components/FeatureDetail";
+import SubscribeBell from "@/app/components/SubscribeBell";
 
 const MapView = dynamic(() => import("@/app/components/MapView"), {
   ssr: false,
@@ -186,6 +187,7 @@ export default function Home() {
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950">
       <MapView activeLayers={activeLayers} onFeatureClick={handleFeatureClick} />
+      <SubscribeBell />
 
       <BottomSheet state={sheetState} onStateChange={setSheetState}>
         {selectedFeature ? (
